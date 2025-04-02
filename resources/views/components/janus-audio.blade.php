@@ -16,7 +16,8 @@
         <p class="text-sm" x-text="artist + ' — ' + album"></p>
     </div>
 
-    <audio x-ref="audio" autoplay muted controls></audio>
+    <audio x-ref="audio" controls playsinline preload="auto" autoplay muted style="display:none"></audio>
+
 
     <div class="mt-4 space-x-2">
         <button @click="unlockAudio(); startStream()" :disabled="!sessionId || !handleId"

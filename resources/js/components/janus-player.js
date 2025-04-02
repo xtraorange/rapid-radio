@@ -128,20 +128,34 @@ export default function janusAudioPlayer(config = {}) {
 
             this.pc.ontrack = (e) => {
                 const stream = e.streams[0];
-                this.$refs.audio.srcObject = stream;
-                this.$refs.audio.muted = false;
-                this.muted = false;
 
-                this.$refs.audio
-                    .play()
-                    .then(() => {
-                        this.log("✅ Audio playback started");
-                        this.setupMediaSession(); // Only after play starts
-                    })
-                    .catch((err) => {
-                        this.muted = true;
-                        console.warn("[JanusPlayer] ⚠️ Playback error:", err);
-                    });
+                const audio = this.$refs.audio;
+                audio.srcObject = stream;
+
+                // Give hints to the browser that this is a legit media element
+                audio.preload = "auto";
+                audio.autoplay = true;
+                audio.muted = false;
+                audio.controls = true; // Optional: helps debugging
+                audio.defaultMuted = false;
+                audio.type = "audio/webm"; // or whatever your Janus stream is sending
+
+                const tryPlayback = () => {
+                    audio
+                        .play()
+                        .then(() => {
+                            this.muted = false;
+                            this.log("✅ Audio playback started");
+                            this.setupMediaSession(); // Trigger MediaSession after play
+                        })
+                        .catch((err) => {
+                            this.muted = true;
+                            this.log("⚠️ Audio play failed:", err);
+                            setTimeout(tryPlayback, 500); // Try again if needed
+                        });
+                };
+
+                tryPlayback();
             };
 
             this.pc.oniceconnectionstatechange = () => {
