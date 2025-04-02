@@ -131,14 +131,12 @@ export default function janusAudioPlayer(config = {}) {
 
                 const audio = this.$refs.audio;
                 audio.srcObject = stream;
-
-                // Give hints to the browser that this is a legit media element
                 audio.preload = "auto";
                 audio.autoplay = true;
                 audio.muted = false;
-                audio.controls = true; // Optional: helps debugging
+                audio.controls = true;
                 audio.defaultMuted = false;
-                audio.type = "audio/webm"; // or whatever your Janus stream is sending
+                audio.type = "audio/webm";
 
                 const tryPlayback = () => {
                     audio
@@ -146,12 +144,23 @@ export default function janusAudioPlayer(config = {}) {
                         .then(() => {
                             this.muted = false;
                             this.log("✅ Audio playback started");
-                            this.setupMediaSession(); // Trigger MediaSession after play
+
+                            const activator = this.$refs.activator;
+                            if (activator) {
+                                activator.play().then(() => {
+                                    this.setupMediaSession();
+                                    this.log(
+                                        "🎷 MediaSession should now be active"
+                                    );
+                                });
+                            } else {
+                                this.setupMediaSession();
+                            }
                         })
                         .catch((err) => {
                             this.muted = true;
                             this.log("⚠️ Audio play failed:", err);
-                            setTimeout(tryPlayback, 500); // Try again if needed
+                            setTimeout(tryPlayback, 500);
                         });
                 };
 
@@ -251,7 +260,7 @@ export default function janusAudioPlayer(config = {}) {
         },
 
         setupMediaSession() {
-            console.log("🎧 Attempting to set up MediaSession...");
+            console.log("🎷 Attempting to set up MediaSession...");
 
             if (!("mediaSession" in navigator)) {
                 console.warn("❌ MediaSession not supported");

@@ -16,7 +16,13 @@
         <p class="text-sm" x-text="artist + ' — ' + album"></p>
     </div>
 
-    <audio x-ref="audio" controls playsinline preload="auto" autoplay muted style="display:none"></audio>
+    <!-- Main Janus stream player -->
+    <audio x-ref="audio" controls playsinline preload="auto" autoplay muted class="w-full mt-4"></audio>
+
+
+    <!-- Background dummy player to activate MediaSession -->
+    <audio x-ref="activator" src="/silent.mp3" preload="auto" style="display: none"></audio>
+
 
 
     <div class="mt-4 space-x-2">
