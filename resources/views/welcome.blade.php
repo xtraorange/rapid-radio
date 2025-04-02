@@ -14,6 +14,8 @@
     <!-- Styles / Scripts -->
     @if (file_exists(public_path('build/manifest.json')) || file_exists(public_path('hot')))
         @vite(['resources/css/app.css', 'resources/js/app.js'])
+        <link rel="manifest" href="/manifest.webmanifest">
+        <meta name="theme-color" content="#111827">
     @else
         <style>
             /*! tailwindcss v4.0.7 | MIT License | https://tailwindcss.com */
