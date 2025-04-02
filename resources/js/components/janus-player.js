@@ -41,9 +41,10 @@ export default function janusAudioPlayer(config = {}) {
                 source.start(0);
                 this.autoplayUnlocked = true;
                 this.muted = false;
-                this.log("Audio context unlocked");
+                this.$refs.audio.muted = false;
+                this.log("🔓 Audio context unlocked");
             } catch (err) {
-                console.warn("[JanusPlayer] Audio unlock failed:", err);
+                console.warn("[JanusPlayer] 🔒 Audio unlock failed:", err);
             }
         },
 
@@ -126,19 +127,20 @@ export default function janusAudioPlayer(config = {}) {
             };
 
             this.pc.ontrack = (e) => {
-                this.$refs.audio.srcObject = e.streams[0];
-                this.$refs.audio.muted = !this.autoplayUnlocked;
-                this.muted = !this.autoplayUnlocked;
+                const stream = e.streams[0];
+                this.$refs.audio.srcObject = stream;
+                this.$refs.audio.muted = false;
+                this.muted = false;
 
                 this.$refs.audio
                     .play()
                     .then(() => {
-                        this.log("Audio playback started");
-                        this.setupMediaSession();
+                        this.log("✅ Audio playback started");
+                        this.setupMediaSession(); // Only after play starts
                     })
                     .catch((err) => {
                         this.muted = true;
-                        console.warn("[JanusPlayer] Playback error:", err);
+                        console.warn("[JanusPlayer] ⚠️ Playback error:", err);
                     });
             };
 
@@ -235,16 +237,49 @@ export default function janusAudioPlayer(config = {}) {
         },
 
         setupMediaSession() {
-            this.updateMediaMetadata(); // Use default values
+            console.log("🎧 Attempting to set up MediaSession...");
+
+            if (!("mediaSession" in navigator)) {
+                console.warn("❌ MediaSession not supported");
+                return;
+            }
+
+            console.log("✅ MediaSession is available");
+
+            navigator.mediaSession.metadata = new MediaMetadata({
+                title: this.title,
+                artist: this.artist,
+                album: this.album,
+                artwork: [
+                    {
+                        src: "/logo-192.png",
+                        sizes: "192x192",
+                        type: "image/png",
+                    },
+                    {
+                        src: "/logo-512.png",
+                        sizes: "512x512",
+                        type: "image/png",
+                    },
+                ],
+            });
+
+            navigator.mediaSession.setActionHandler("play", () => {
+                this.$refs.audio.play().catch(() => {});
+            });
+
+            navigator.mediaSession.setActionHandler("pause", () => {
+                this.$refs.audio.pause();
+            });
+
+            console.log("🎶 MediaSession metadata set.");
         },
 
         updateMediaMetadata({ title, artist, album, artwork } = {}) {
-            // Update UI text
             this.title = title || this.title;
             this.artist = artist || this.artist;
             this.album = album || this.album;
 
-            // Update browser/media session
             if (!("mediaSession" in navigator)) return;
 
             navigator.mediaSession.metadata = new MediaMetadata({

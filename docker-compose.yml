@@ -30,7 +30,12 @@ services:
                 git clone --depth 1 https://github.com/xtraorange/rapid-radio.git /app/repo;
                 else
                 echo "Repo found. Pulling latest...";
-                cd /app/repo && git pull origin main;
+                cd /app/repo
+                echo "Resetting any local changes before pull..."
+                git reset --hard HEAD
+                git clean -fd
+                git pull origin main;
+
                 fi
 
                 echo "Step 2: Setting DocumentRoot for Laravel...";
