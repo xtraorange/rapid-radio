@@ -1,0 +1,140 @@
+version: "3.8"
+
+services:
+    app:
+        image: php:8.4.5-apache
+        container_name: rapid_radio_app
+        depends_on:
+            - db
+        environment:
+            - WEB_DOCUMENT_ROOT=/app/repo/public
+            - DB_HOST=rapid_radio_db
+            - DB_PORT=3306
+            - DB_DATABASE=rapid_radio
+            - DB_USER=rapid_radio
+            - DB_PASSWORD=secret
+        volumes:
+            - rapid_radio_code:/app
+            - rapid_radio_storage:/app/storage
+        ports:
+            - "8000:80"
+        command: |
+            bash -c '
+              echo "Step 0: Installing necessary packages...";
+              apt-get update && apt-get install -y unzip git libzip-dev && docker-php-ext-install zip pdo pdo_mysql;
+
+              echo "Step 1: Cloning or updating repository...";
+              mkdir -p /app/repo;
+              if [ ! -d /app/repo/.git ]; then
+                echo "Repo not found. Cloning...";
+                git clone --depth 1 https://github.com/xtraorange/rapid-radio.git /app/repo;
+              else
+                echo "Repo already cloned. Pulling latest changes...";
+                cd /app/repo && git pull origin main;
+              fi
+
+              echo "Listing contents of /app/repo after git sync:";
+              ls -la /app/repo;
+
+              echo "Step 2: Updating Apache DocumentRoot...";
+              sed -i "s|/var/www/html|/app/repo/public|g" /etc/apache2/sites-available/000-default.conf;
+              echo "ServerName localhost" >> /etc/apache2/apache2.conf;
+
+              echo "Step 3: Creating Laravel Apache directory config...";
+              echo "<Directory /app/repo/public>" > /etc/apache2/conf-available/laravel.conf;
+              echo "    Options Indexes FollowSymLinks" >> /etc/apache2/conf-available/laravel.conf;
+              echo "    AllowOverride All" >> /etc/apache2/conf-available/laravel.conf;
+              echo "    Require all granted" >> /etc/apache2/conf-available/laravel.conf;
+              echo "</Directory>" >> /etc/apache2/conf-available/laravel.conf;
+              a2enconf laravel.conf;
+
+              echo "Step 4: Fixing permissions...";
+              mkdir -p /app/repo/storage/logs;
+              chown -R www-data:www-data /app/repo/storage /app/repo/bootstrap/cache;
+              chmod -R 775 /app/repo/storage /app/repo/bootstrap/cache;
+
+              echo "Step 5: Checking for composer.lock changes...";
+              cd /app/repo
+              md5sum composer.lock 2>/dev/null > /tmp/last-composer.lock.md5 || true
+              if [ ! -d vendor ] || ! md5sum -c --quiet /tmp/last-composer.lock.md5; then
+                echo "Installing or updating PHP dependencies...";
+                if [ ! -f /usr/local/bin/composer ]; then
+                  echo "Composer not found, installing...";
+                  curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer;
+                fi;
+                composer install --no-dev --optimize-autoloader;
+              else
+                echo "PHP dependencies are up to date.";
+              fi
+
+              if [ -f package.json ]; then
+                echo "Step 6: Checking for frontend changes...";
+                md5sum package-lock.json 2>/dev/null > /tmp/last-package-lock.md5 || true
+                if [ ! -d node_modules ] || ! md5sum -c --quiet /tmp/last-package-lock.md5; then
+                  echo "Installing Node.js and building frontend assets...";
+                  curl -fsSL https://deb.nodesource.com/setup_18.x | bash - && \
+                  apt-get install -y nodejs && \
+                  npm install && npm run build;
+                else
+                  echo "Frontend assets are up to date.";
+                fi;
+              fi
+
+              echo "Step 7: Checking Laravel environment...";
+              if [ ! -f .env ]; then
+                echo ".env not found — assuming fresh install.";
+                cp .env.example .env;
+
+                echo "Updating .env database configuration...";
+                sed -i "s~^\s*DB_CONNECTION=.*~DB_CONNECTION=mysql~" .env;
+
+                echo "Generating Laravel application key...";
+                php artisan key:generate;
+
+                echo "Running database migrations...";
+                php artisan migrate --force;
+              else
+                echo ".env already exists. Checking for new migrations...";
+                find database/migrations -type f | sort | xargs cat | md5sum > /tmp/current-migrations.md5
+                if [ ! -f /tmp/last-migrations.md5 ] || ! cmp -s /tmp/current-migrations.md5 /tmp/last-migrations.md5; then
+                  echo "New migrations detected. Running...";
+                  php artisan migrate --force;
+                  cp /tmp/current-migrations.md5 /tmp/last-migrations.md5
+                else
+                  echo "No new migrations found.";
+                fi;
+              fi
+
+              echo "Step 8: Caching Laravel config, routes, and views...";
+              php artisan config:cache;
+              php artisan route:cache;
+              php artisan view:cache;
+
+              echo "Step 9: Finalizing Apache setup...";
+              a2enmod rewrite;
+              a2enconf laravel.conf;
+              apachectl configtest;
+
+              echo "Starting Apache...";
+              apache2-foreground;
+            '
+        restart: always
+
+    db:
+        image: mysql:8.0
+        container_name: rapid_radio_db
+        environment:
+            - MYSQL_DATABASE=rapid_radio
+            - MYSQL_ROOT_PASSWORD=secret
+            - MYSQL_USER=rapid_radio
+            - MYSQL_PASSWORD=secret
+        volumes:
+            - rapid_radio_db_data:/var/lib/mysql
+        ports:
+            - "3306:3306"
+        restart: always
+
+volumes:
+    rapid_radio_code:
+    rapid_radio_storage:
+    rapid_radio_db_data:
