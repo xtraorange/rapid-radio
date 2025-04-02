@@ -323,6 +323,13 @@ export default function janusAudioPlayer(config = {}) {
                 ],
             });
 
+            Object.defineProperty(this.$refs.activator, "duration", {
+                get: () => 600, // 10 mins
+            });
+            Object.defineProperty(this.$refs.activator, "currentTime", {
+                get: () => 1,
+            });
+
             navigator.mediaSession.setActionHandler("play", () => {
                 this.$refs.audio.play().catch(() => {});
             });
