@@ -18,105 +18,97 @@ services:
             - rapid_radio_storage:/app/storage
         ports:
             - "8000:80"
-        command: |
+        command: >
             bash -c '
-              echo "Step 0: Installing necessary packages...";
-              apt-get update && apt-get install -y unzip git libzip-dev && docker-php-ext-install zip pdo pdo_mysql;
+                echo "Step 0: Installing system packages...";
+                apt-get update && apt-get install -y unzip git libzip-dev curl gnupg2 && docker-php-ext-install zip pdo pdo_mysql;
 
-              echo "Step 1: Cloning or updating repository...";
-              mkdir -p /app/repo;
-              if [ ! -d /app/repo/.git ]; then
-                echo "Repo not found. Cloning...";
+                echo "Step 1: Preparing repo directory...";
+                mkdir -p /app/repo;
+                if [ ! -d /app/repo/.git ]; then
+                echo "Cloning repo...";
                 git clone --depth 1 https://github.com/xtraorange/rapid-radio.git /app/repo;
-              else
-                echo "Repo already cloned. Pulling latest changes...";
-                cd /app/repo && git pull origin main;
-              fi
-
-              echo "Listing contents of /app/repo after git sync:";
-              ls -la /app/repo;
-
-              echo "Step 2: Updating Apache DocumentRoot...";
-              sed -i "s|/var/www/html|/app/repo/public|g" /etc/apache2/sites-available/000-default.conf;
-              echo "ServerName localhost" >> /etc/apache2/apache2.conf;
-
-              echo "Step 3: Creating Laravel Apache directory config...";
-              echo "<Directory /app/repo/public>" > /etc/apache2/conf-available/laravel.conf;
-              echo "    Options Indexes FollowSymLinks" >> /etc/apache2/conf-available/laravel.conf;
-              echo "    AllowOverride All" >> /etc/apache2/conf-available/laravel.conf;
-              echo "    Require all granted" >> /etc/apache2/conf-available/laravel.conf;
-              echo "</Directory>" >> /etc/apache2/conf-available/laravel.conf;
-              a2enconf laravel.conf;
-
-              echo "Step 4: Fixing permissions...";
-              mkdir -p /app/repo/storage/logs;
-              chown -R www-data:www-data /app/repo/storage /app/repo/bootstrap/cache;
-              chmod -R 775 /app/repo/storage /app/repo/bootstrap/cache;
-
-              echo "Step 5: Checking for composer.lock changes...";
-              cd /app/repo
-              md5sum composer.lock 2>/dev/null > /tmp/last-composer.lock.md5 || true
-              if [ ! -d vendor ] || ! md5sum -c --quiet /tmp/last-composer.lock.md5; then
-                echo "Installing or updating PHP dependencies...";
-                if [ ! -f /usr/local/bin/composer ]; then
-                  echo "Composer not found, installing...";
-                  curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer;
-                fi;
-                composer install --no-dev --optimize-autoloader;
-              else
-                echo "PHP dependencies are up to date.";
-              fi
-
-              if [ -f package.json ]; then
-                echo "Step 6: Checking for frontend changes...";
-                md5sum package-lock.json 2>/dev/null > /tmp/last-package-lock.md5 || true
-                if [ ! -d node_modules ] || ! md5sum -c --quiet /tmp/last-package-lock.md5; then
-                  echo "Installing Node.js and building frontend assets...";
-                  curl -fsSL https://deb.nodesource.com/setup_18.x | bash - && \
-                  apt-get install -y nodejs && \
-                  npm install && npm run build;
                 else
-                  echo "Frontend assets are up to date.";
-                fi;
-              fi
+                echo "Repo found. Pulling latest...";
+                cd /app/repo && git pull origin main;
+                fi
 
-              echo "Step 7: Checking Laravel environment...";
-              if [ ! -f .env ]; then
-                echo ".env not found — assuming fresh install.";
+                echo "Step 2: Setting DocumentRoot for Laravel...";
+                sed -i "s|/var/www/html|/app/repo/public|g" /etc/apache2/sites-available/000-default.conf;
+                echo "ServerName localhost" >> /etc/apache2/apache2.conf;
+
+                echo "Step 3: Apache directory override for Laravel...";
+                echo "<Directory /app/repo/public>" > /etc/apache2/conf-available/laravel.conf;
+                echo "    Options Indexes FollowSymLinks" >> /etc/apache2/conf-available/laravel.conf;
+                echo "    AllowOverride All" >> /etc/apache2/conf-available/laravel.conf;
+                echo "    Require all granted" >> /etc/apache2/conf-available/laravel.conf;
+                echo "</Directory>" >> /etc/apache2/conf-available/laravel.conf;
+                a2enconf laravel.conf;
+
+                echo "Step 4: Laravel file permissions...";
+                mkdir -p /app/repo/storage/logs;
+                chown -R www-data:www-data /app/repo/storage /app/repo/bootstrap/cache;
+                chmod -R 775 /app/repo/storage /app/repo/bootstrap/cache;
+
+                cd /app/repo
+
+                echo "Step 5: Installing Composer if needed...";
+                if [ ! -f /usr/local/bin/composer ]; then
+                curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer;
+                fi
+
+                echo "Step 6: Checking for composer.lock changes...";
+                md5sum composer.lock > /tmp/current-composer.md5 || true
+                if [ ! -d vendor ] || ! cmp -s /tmp/current-composer.md5 /tmp/last-composer.md5; then
+                echo "Installing/updating PHP dependencies...";
+                composer install --no-dev --optimize-autoloader;
+                cp /tmp/current-composer.md5 /tmp/last-composer.md5
+                else
+                echo "No composer.lock changes — skipping PHP install.";
+                fi
+
+                echo "Step 7: Installing Node.js if needed...";
+                curl -fsSL https://deb.nodesource.com/setup_18.x | bash -;
+                apt-get install -y nodejs;
+
+                echo "Step 8: Checking for package-lock.json changes...";
+                md5sum package-lock.json > /tmp/current-package.md5 || true
+                if [ ! -d node_modules ] || ! cmp -s /tmp/current-package.md5 /tmp/last-package.md5; then
+                echo "Installing/updating Node modules and building assets...";
+                npm install && npm run build;
+                cp /tmp/current-package.md5 /tmp/last-package.md5
+                else
+                echo "No package-lock.json changes — skipping build.";
+                fi
+
+                echo "Step 9: Laravel .env setup if missing...";
+                if [ ! -f .env ]; then
                 cp .env.example .env;
-
-                echo "Updating .env database configuration...";
                 sed -i "s~^\s*DB_CONNECTION=.*~DB_CONNECTION=mysql~" .env;
-
-                echo "Generating Laravel application key...";
                 php artisan key:generate;
+                fi
 
-                echo "Running database migrations...";
-                php artisan migrate --force;
-              else
-                echo ".env already exists. Checking for new migrations...";
+                echo "Step 10: Checking for new migrations...";
                 find database/migrations -type f | sort | xargs cat | md5sum > /tmp/current-migrations.md5
                 if [ ! -f /tmp/last-migrations.md5 ] || ! cmp -s /tmp/current-migrations.md5 /tmp/last-migrations.md5; then
-                  echo "New migrations detected. Running...";
-                  php artisan migrate --force;
-                  cp /tmp/current-migrations.md5 /tmp/last-migrations.md5
+                echo "Running new migrations...";
+                php artisan migrate --force;
+                cp /tmp/current-migrations.md5 /tmp/last-migrations.md5
                 else
-                  echo "No new migrations found.";
-                fi;
-              fi
+                echo "No new migrations found.";
+                fi
 
-              echo "Step 8: Caching Laravel config, routes, and views...";
-              php artisan config:cache;
-              php artisan route:cache;
-              php artisan view:cache;
+                echo "Step 11: Clearing and caching config, routes, and views...";
+                php artisan config:clear;
+                php artisan route:clear;
+                php artisan view:clear;
+                php artisan optimize;
 
-              echo "Step 9: Finalizing Apache setup...";
-              a2enmod rewrite;
-              a2enconf laravel.conf;
-              apachectl configtest;
+                echo "Step 12: Enabling Apache rewrite and starting server...";
+                a2enmod rewrite;
+                apachectl configtest;
 
-              echo "Starting Apache...";
-              apache2-foreground;
+                apache2-foreground;
             '
         restart: always
 

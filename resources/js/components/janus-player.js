@@ -1,11 +1,13 @@
 export default function janusAudioPlayer(config = {}) {
     return {
+        // Config
         ws: null,
         wsUrl: config.wsUrl || "ws://localhost:3000/ws",
         streamId: config.streamId || 1,
         autoplay: config.autoplay ?? true,
         debug: config.debug ?? false,
 
+        // Session
         sessionId: null,
         handleId: null,
         pc: null,
@@ -17,9 +19,14 @@ export default function janusAudioPlayer(config = {}) {
         muted: true,
         autoplayUnlocked: false,
 
+        // Metadata state
+        title: "Rapid Radio",
+        artist: "Live Feed",
+        album: "Scanner",
+
         init() {
             this.log("Janus Audio Player initializing...");
-            this.connect(); // ✅ Connect on load
+            this.connect();
         },
 
         unlockAudio() {
@@ -125,7 +132,10 @@ export default function janusAudioPlayer(config = {}) {
 
                 this.$refs.audio
                     .play()
-                    .then(() => this.log("Playback started"))
+                    .then(() => {
+                        this.log("Audio playback started");
+                        this.setupMediaSession();
+                    })
                     .catch((err) => {
                         this.muted = true;
                         console.warn("[JanusPlayer] Playback error:", err);
@@ -222,6 +232,46 @@ export default function janusAudioPlayer(config = {}) {
                     service: "janus",
                 })
             );
+        },
+
+        setupMediaSession() {
+            this.updateMediaMetadata(); // Use default values
+        },
+
+        updateMediaMetadata({ title, artist, album, artwork } = {}) {
+            // Update UI text
+            this.title = title || this.title;
+            this.artist = artist || this.artist;
+            this.album = album || this.album;
+
+            // Update browser/media session
+            if (!("mediaSession" in navigator)) return;
+
+            navigator.mediaSession.metadata = new MediaMetadata({
+                title: this.title,
+                artist: this.artist,
+                album: this.album,
+                artwork: artwork || [
+                    {
+                        src: "/logo-192.png",
+                        sizes: "192x192",
+                        type: "image/png",
+                    },
+                    {
+                        src: "/logo-512.png",
+                        sizes: "512x512",
+                        type: "image/png",
+                    },
+                ],
+            });
+
+            navigator.mediaSession.setActionHandler("play", () => {
+                this.$refs.audio.play().catch(() => {});
+            });
+
+            navigator.mediaSession.setActionHandler("pause", () => {
+                this.$refs.audio.pause();
+            });
         },
     };
 }

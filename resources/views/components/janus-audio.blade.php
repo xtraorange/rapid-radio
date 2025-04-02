@@ -11,6 +11,11 @@
     autoplay: {{ $autoplay ? 'true' : 'false' }},
     debug: {{ $debug ? 'true' : 'false' }}
 })" x-init="init">
+    <div class="mt-4 text-gray-700">
+        <h2 class="text-xl font-bold" x-text="title"></h2>
+        <p class="text-sm" x-text="artist + ' — ' + album"></p>
+    </div>
+
     <audio x-ref="audio" autoplay muted controls></audio>
 
     <div class="mt-4 space-x-2">
@@ -25,5 +30,13 @@
         <button @click="sendCommand('blacklist')">⛔ Blacklist</button>
     </div>
 
+    <button class="px-3 py-1 mt-2 text-white bg-green-600 rounded"
+        @click="updateMediaMetadata({
+      title: 'Scanner Test',
+      artist: 'Zone 5',
+      album: 'Special Ops'
+    })">
+        🔄 Update Metadata
+    </button>
 
 </div>
