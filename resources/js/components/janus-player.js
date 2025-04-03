@@ -7,6 +7,8 @@ export default function janusAudioPlayer(config = {}) {
         autoplay: config.autoplay ?? true,
         debug: config.debug ?? false,
 
+        poweredOn: false,
+
         // Session
         sessionId: null,
         handleId: null,
@@ -27,6 +29,15 @@ export default function janusAudioPlayer(config = {}) {
         init() {
             this.log("Janus Audio Player initializing...");
             this.connect();
+        },
+        togglePower() {
+            this.poweredOn = !this.poweredOn;
+            if (this.poweredOn) {
+                this.unlockAudio();
+                this.startStream();
+            } else {
+                this.stopStream();
+            }
         },
 
         unlockAudio() {
