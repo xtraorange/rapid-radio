@@ -15,105 +15,103 @@ services:
             - DB_PASSWORD=secret
         volumes:
             - rapid_radio_code:/app
-            - rapid_radio_storage:/app/storage
+            - rapid_radio_storage:/app/repo/storage
         ports:
             - "8000:80"
-        command: >
+        command: |
             bash -c '
-                echo "Step 0: Installing system packages...";
-                apt-get update && apt-get install -y unzip git libzip-dev curl gnupg2 && docker-php-ext-install zip pdo pdo_mysql;
+            set -e;
 
-                echo "Step 1: Preparing repo directory...";
-                mkdir -p /app/repo;
-                if [ ! -d /app/repo/.git ]; then
-                echo "Cloning repo...";
-                git clone --depth 1 https://github.com/xtraorange/rapid-radio.git /app/repo;
-                else
-                echo "Repo found. Pulling latest...";
-                cd /app/repo
-                echo "Resetting any local changes before pull..."
-                git reset --hard HEAD
-                git clean -fd
-                git pull origin main;
+            echo "Step 0: System initialization";
+            apt-get update && apt-get install -y unzip git libzip-dev curl gnupg2;
+            docker-php-ext-install zip pdo pdo_mysql;
 
-                fi
-
-                echo "Step 2: Setting DocumentRoot for Laravel...";
-                sed -i "s|/var/www/html|/app/repo/public|g" /etc/apache2/sites-available/000-default.conf;
-                echo "ServerName localhost" >> /etc/apache2/apache2.conf;
-
-                echo "Step 3: Apache directory override for Laravel...";
-                echo "<Directory /app/repo/public>" > /etc/apache2/conf-available/laravel.conf;
-                echo "    Options Indexes FollowSymLinks" >> /etc/apache2/conf-available/laravel.conf;
-                echo "    AllowOverride All" >> /etc/apache2/conf-available/laravel.conf;
-                echo "    Require all granted" >> /etc/apache2/conf-available/laravel.conf;
-                echo "</Directory>" >> /etc/apache2/conf-available/laravel.conf;
-                a2enconf laravel.conf;
-
-                echo "Step 4: Laravel file permissions...";
-                mkdir -p /app/repo/storage/logs;
-                chown -R www-data:www-data /app/repo/storage /app/repo/bootstrap/cache;
-                chmod -R 775 /app/repo/storage /app/repo/bootstrap/cache;
-
-                cd /app/repo
-
-                echo "Step 5: Installing Composer if needed...";
-                if [ ! -f /usr/local/bin/composer ]; then
+            echo "Step 0.1: Installing Composer and Node if missing";
+            if [ ! -f /usr/local/bin/composer ]; then
                 curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer;
-                fi
-
-                echo "Step 6: Checking for composer.lock changes...";
-                md5sum composer.lock > /tmp/current-composer.md5 || true
-                if [ ! -d vendor ] || ! cmp -s /tmp/current-composer.md5 /tmp/last-composer.md5; then
-                echo "Installing/updating PHP dependencies...";
-                composer install --no-dev --optimize-autoloader;
-                cp /tmp/current-composer.md5 /tmp/last-composer.md5
-                else
-                echo "No composer.lock changes — skipping PHP install.";
-                fi
-
-                echo "Step 7: Installing Node.js if needed...";
+            fi
+            if ! command -v node >/dev/null 2>&1; then
                 curl -fsSL https://deb.nodesource.com/setup_18.x | bash -;
                 apt-get install -y nodejs;
+            fi
 
-                echo "Step 8: Checking for package-lock.json changes...";
-                md5sum package-lock.json > /tmp/current-package.md5 || true
-                if [ ! -d node_modules ] || ! cmp -s /tmp/current-package.md5 /tmp/last-package.md5; then
-                echo "Installing/updating Node modules and building assets...";
-                npm install && npm run build;
-                cp /tmp/current-package.md5 /tmp/last-package.md5
-                else
-                echo "No package-lock.json changes — skipping build.";
+            echo "Step 1: Preparing repository";
+            mkdir -p /app/repo;
+            if [ ! -d /app/repo/.git ]; then
+                echo "Cloning repo (first run)...";
+                git clone --depth 1 https://github.com/xtraorange/rapid-radio.git /app/repo;
+            else
+                echo "Repo exists – updating...";
+                cd /app/repo;
+                git reset --hard HEAD;
+                git clean -fd;
+                git pull origin main;
+            fi
+
+            cd /app/repo;
+
+            echo "Step 2: First-run initialization";
+            if [ ! -f .initialized ]; then
+                echo "Running one-time setup tasks...";
+
+                # Configure Apache only once.
+                sed -i "s|/var/www/html|/app/repo/public|g" /etc/apache2/sites-available/000-default.conf;
+                if [ ! -f /etc/apache2/conf-available/laravel.conf ]; then
+                    echo "<Directory /app/repo/public>" > /etc/apache2/conf-available/laravel.conf;
+                    echo "    Options Indexes FollowSymLinks" >> /etc/apache2/conf-available/laravel.conf;
+                    echo "    AllowOverride All" >> /etc/apache2/conf-available/laravel.conf;
+                    echo "    Require all granted" >> /etc/apache2/conf-available/laravel.conf;
+                    echo "</Directory>" >> /etc/apache2/conf-available/laravel.conf;
+                    a2enconf laravel.conf;
                 fi
 
-                echo "Step 9: Laravel .env setup if missing...";
+                echo "Setting file permissions...";
+                mkdir -p storage/logs;
+                chown -R www-data:www-data storage bootstrap/cache;
+                chmod -R 775 storage bootstrap/cache;
+
+                echo "Configuring Laravel environment...";
                 if [ ! -f .env ]; then
-                cp .env.example .env;
-                sed -i "s~^\s*DB_CONNECTION=.*~DB_CONNECTION=mysql~" .env;
-                php artisan key:generate;
+                    cp .env.example .env;
+                    sed -i "s~^\s*DB_CONNECTION=.*~DB_CONNECTION=mysql~" .env;
+                    php artisan key:generate;
                 fi
 
-                echo "Step 10: Checking for new migrations...";
-                find database/migrations -type f | sort | xargs cat | md5sum > /tmp/current-migrations.md5
-                if [ ! -f /tmp/last-migrations.md5 ] || ! cmp -s /tmp/current-migrations.md5 /tmp/last-migrations.md5; then
-                echo "Running new migrations...";
+                touch .initialized;
+                echo "Initial setup complete.";
+            else
+                echo "Initial setup already completed. Skipping one-time tasks.";
+            fi
+
+            echo "Step 3: Checking for repository updates";
+            CURRENT_COMMIT=$(git rev-parse HEAD);
+            if [ ! -f .last_commit ] || [ "$CURRENT_COMMIT" != "$(cat .last_commit)" ]; then
+                echo "Changes detected (commit changed) – updating dependencies and assets...";
+
+                echo "Running composer install...";
+                composer install --no-dev --optimize-autoloader;
+
+                echo "Running npm install and asset build...";
+                npm install && npm run build;
+
+                echo "Running database migrations...";
                 php artisan migrate --force;
-                cp /tmp/current-migrations.md5 /tmp/last-migrations.md5
-                else
-                echo "No new migrations found.";
-                fi
 
-                echo "Step 11: Clearing and caching config, routes, and views...";
-                php artisan config:clear;
-                php artisan route:clear;
-                php artisan view:clear;
-                php artisan optimize;
+                echo "$CURRENT_COMMIT" > .last_commit;
+            else
+                echo "No repository changes detected – skipping dependency updates and asset build.";
+            fi
 
-                echo "Step 12: Enabling Apache rewrite and starting server...";
-                a2enmod rewrite;
-                apachectl configtest;
+            echo "Step 4: Clearing caches and optimizing Laravel";
+            php artisan config:clear;
+            php artisan route:clear;
+            php artisan view:clear;
+            php artisan optimize;
 
-                apache2-foreground;
+            echo "Step 5: Enabling Apache rewrite and launching server";
+            a2enmod rewrite;
+            apachectl configtest;
+            apache2-foreground;
             '
         restart: always
 

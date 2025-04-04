@@ -7,21 +7,21 @@ export default function janusAudioPlayer(config = {}) {
         autoplay: config.autoplay ?? true,
         debug: config.debug ?? false,
 
+        // State
         poweredOn: false,
-
-        // Session
         sessionId: null,
         handleId: null,
         pc: null,
         isProcessingSDP: false,
         isWatching: false,
         iceQueue: [],
-
-        // Audio state
         muted: true,
         autoplayUnlocked: false,
+        currentTime: "00:00",
+        showVolumeSlider: false,
+        volume: 1.0,
+        volumeSliderStyle: "",
 
-        // Metadata state
         title: "Rapid Radio",
         artist: "Live Feed",
         album: "Scanner",
@@ -29,7 +29,22 @@ export default function janusAudioPlayer(config = {}) {
         init() {
             this.log("Janus Audio Player initializing...");
             this.connect();
+            this.updateTimeLoop();
+            // Global click listener to close the volume slider if click occurs outside
+            document.addEventListener("click", (event) => {
+                if (this.showVolumeSlider) {
+                    // If the click target is NOT inside the slider (using x-ref) and not on a volume toggle button
+                    if (
+                        this.$refs.volumeSlider &&
+                        !this.$refs.volumeSlider.contains(event.target) &&
+                        !event.target.closest(".volume-toggle")
+                    ) {
+                        this.showVolumeSlider = false;
+                    }
+                }
+            });
         },
+
         togglePower() {
             this.poweredOn = !this.poweredOn;
             if (this.poweredOn) {
@@ -59,12 +74,6 @@ export default function janusAudioPlayer(config = {}) {
             }
         },
 
-        log(...args) {
-            if (this.debug) {
-                console.log("[JanusPlayer]", ...args);
-            }
-        },
-
         connect() {
             this.log("Connecting to WebSocket:", this.wsUrl);
             this.ws = new WebSocket(this.wsUrl);
@@ -72,7 +81,6 @@ export default function janusAudioPlayer(config = {}) {
             this.ws.onopen = () => {
                 const waitAndSend = () => {
                     if (this.ws.readyState === WebSocket.OPEN) {
-                        this.log("WebSocket open — sending janus init");
                         this.ws.send(JSON.stringify({ service: "janus" }));
                     } else {
                         setTimeout(waitAndSend, 50);
@@ -99,17 +107,12 @@ export default function janusAudioPlayer(config = {}) {
 
         handleMessage(msg) {
             if (msg.event === "janus_session") {
-                this.log("Janus session ready:", msg.sessionId);
                 this.sessionId = msg.sessionId;
                 this.handleId = msg.handleId;
             } else if (msg.janus === "event" && msg.jsep) {
-                this.log("Received JSEP offer");
                 this.handleRemoteSDP(msg.jsep);
             } else if (msg.janus === "trickle") {
-                this.log("Got ICE candidate");
                 this.addIceCandidate(msg.candidate);
-            } else if (msg.janus === "webrtcup") {
-                this.log("WebRTC is up!");
             }
         },
 
@@ -138,44 +141,23 @@ export default function janusAudioPlayer(config = {}) {
             };
 
             this.pc.ontrack = (e) => {
-                const stream = e.streams[0];
-
                 const audio = this.$refs.audio;
-                audio.srcObject = stream;
+                audio.srcObject = e.streams[0];
                 audio.preload = "auto";
                 audio.autoplay = true;
                 audio.muted = false;
-                audio.controls = true;
-                audio.defaultMuted = false;
-                audio.type = "audio/webm";
-
-                const tryPlayback = () => {
-                    audio
-                        .play()
-                        .then(() => {
-                            this.muted = false;
-                            this.log("✅ Audio playback started");
-
-                            const activator = this.$refs.activator;
-                            if (activator) {
-                                activator.play().then(() => {
-                                    this.setupMediaSession();
-                                    this.log(
-                                        "🎷 MediaSession should now be active"
-                                    );
-                                });
-                            } else {
-                                this.setupMediaSession();
-                            }
-                        })
-                        .catch((err) => {
-                            this.muted = true;
-                            this.log("⚠️ Audio play failed:", err);
-                            setTimeout(tryPlayback, 500);
-                        });
-                };
-
-                tryPlayback();
+                audio.volume = this.volume;
+                audio
+                    .play()
+                    .then(() => {
+                        this.muted = false;
+                        this.log("✅ Audio playback started");
+                        this.setupMediaSession();
+                    })
+                    .catch((err) => {
+                        this.muted = true;
+                        this.log("⚠️ Audio play failed:", err);
+                    });
             };
 
             this.pc.oniceconnectionstatechange = () => {
@@ -184,7 +166,6 @@ export default function janusAudioPlayer(config = {}) {
                         this.pc.iceConnectionState
                     )
                 ) {
-                    this.log("ICE failed, reconnecting...");
                     this.cleanup();
                     this.isWatching = false;
                     setTimeout(() => this.startStream(), 2000);
@@ -218,28 +199,10 @@ export default function janusAudioPlayer(config = {}) {
             }
         },
 
-        addIceCandidate(candidate) {
-            if (this.pc) {
-                this.pc.addIceCandidate(candidate).catch(console.error);
-            } else {
-                this.iceQueue.push(candidate);
-            }
-        },
-
-        cleanup() {
-            if (this.pc) {
-                this.pc.close();
-                this.pc = null;
-            }
-            this.isProcessingSDP = false;
-        },
-
         startStream() {
             if (!this.sessionId || !this.handleId || this.isWatching) return;
 
             this.isWatching = true;
-            this.log("Starting stream:", this.streamId);
-
             this.ws.send(
                 JSON.stringify({
                     janus: "message",
@@ -257,6 +220,29 @@ export default function janusAudioPlayer(config = {}) {
             );
         },
 
+        stopStream() {
+            const audio = this.$refs.audio;
+            audio.pause();
+            audio.srcObject = null;
+            this.cleanup();
+        },
+
+        cleanup() {
+            if (this.pc) {
+                this.pc.close();
+                this.pc = null;
+            }
+            this.isProcessingSDP = false;
+        },
+
+        addIceCandidate(candidate) {
+            if (this.pc) {
+                this.pc.addIceCandidate(candidate).catch(console.error);
+            } else {
+                this.iceQueue.push(candidate);
+            }
+        },
+
         sendCommand(cmd) {
             this.ws.send(
                 JSON.stringify({
@@ -271,14 +257,7 @@ export default function janusAudioPlayer(config = {}) {
         },
 
         setupMediaSession() {
-            console.log("🎷 Attempting to set up MediaSession...");
-
-            if (!("mediaSession" in navigator)) {
-                console.warn("❌ MediaSession not supported");
-                return;
-            }
-
-            console.log("✅ MediaSession is available");
+            if (!("mediaSession" in navigator)) return;
 
             navigator.mediaSession.metadata = new MediaMetadata({
                 title: this.title,
@@ -290,11 +269,6 @@ export default function janusAudioPlayer(config = {}) {
                         sizes: "192x192",
                         type: "image/png",
                     },
-                    {
-                        src: "/logo-512.png",
-                        sizes: "512x512",
-                        type: "image/png",
-                    },
                 ],
             });
 
@@ -305,49 +279,39 @@ export default function janusAudioPlayer(config = {}) {
             navigator.mediaSession.setActionHandler("pause", () => {
                 this.$refs.audio.pause();
             });
-
-            console.log("🎶 MediaSession metadata set.");
         },
 
-        updateMediaMetadata({ title, artist, album, artwork } = {}) {
-            this.title = title || this.title;
-            this.artist = artist || this.artist;
-            this.album = album || this.album;
+        updateTimeLoop() {
+            const format = (s) => String(Math.floor(s)).padStart(2, "0");
+            const loop = () => {
+                if (this.$refs.audio) {
+                    const secs = this.$refs.audio.currentTime;
+                    this.currentTime = `${format(secs / 60)}:${format(
+                        secs % 60
+                    )}`;
+                }
+                requestAnimationFrame(loop);
+            };
+            requestAnimationFrame(loop);
+        },
 
-            if (!("mediaSession" in navigator)) return;
+        toggleVolumeSlider(event) {
+            this.showVolumeSlider = !this.showVolumeSlider;
+            if (this.showVolumeSlider && event) {
+                let rect = event.currentTarget.getBoundingClientRect();
+                let top = rect.bottom + window.scrollY;
+                let left = rect.left + window.scrollX;
+                this.volumeSliderStyle = `position: absolute; top: ${top}px; left: ${left}px;`;
+            }
+        },
 
-            navigator.mediaSession.metadata = new MediaMetadata({
-                title: this.title,
-                artist: this.artist,
-                album: this.album,
-                artwork: artwork || [
-                    {
-                        src: "/logo-192.png",
-                        sizes: "192x192",
-                        type: "image/png",
-                    },
-                    {
-                        src: "/logo-512.png",
-                        sizes: "512x512",
-                        type: "image/png",
-                    },
-                ],
-            });
+        setVolume(event) {
+            this.volume = parseFloat(event.target.value);
+            this.$refs.audio.volume = this.volume;
+        },
 
-            Object.defineProperty(this.$refs.activator, "duration", {
-                get: () => 600, // 10 mins
-            });
-            Object.defineProperty(this.$refs.activator, "currentTime", {
-                get: () => 1,
-            });
-
-            navigator.mediaSession.setActionHandler("play", () => {
-                this.$refs.audio.play().catch(() => {});
-            });
-
-            navigator.mediaSession.setActionHandler("pause", () => {
-                this.$refs.audio.pause();
-            });
+        log(...args) {
+            if (this.debug) console.log("[JanusPlayer]", ...args);
         },
     };
 }

@@ -3,9 +3,7 @@
 <!-- External Assets -->
 <link href="https://fonts.googleapis.com/css2?family=Digital+7+Mono&display=swap" rel="stylesheet" />
 
-
 <style>
-    /* Shared Styles */
     .digital {
         font-family: "Digital 7 Mono", monospace;
     }
@@ -24,6 +22,8 @@
         border-left: 4px solid rgba(255, 255, 255, 0.2);
         border-bottom: 4px solid rgba(0, 0, 0, 0.3);
         border-right: 4px solid rgba(0, 0, 0, 0.3);
+        border-radius: 1rem;
+        box-shadow: 0 8px 12px rgba(0, 0, 0, 0.4);
     }
 
     .scanner-bg {
@@ -63,13 +63,11 @@
 
     .power-slider {
         width: 4rem;
-        /* 64px */
         height: 5.5rem;
     }
 
     .power-toggle-btn {
         width: 3.5rem;
-        /* 56px */
         height: 3rem;
     }
 
@@ -80,10 +78,22 @@
         background: white;
         border: 2px solid #555;
         box-shadow: 0 6px 10px rgba(0, 0, 0, 0.25);
+        cursor: pointer;
+        z-index: 20;
+        position: relative;
     }
 
     .volume-knob::before {
         content: none;
+    }
+
+    .volume-slider-wrapper {
+        background: white;
+        border: 2px solid #555;
+        border-radius: 9999px;
+        padding: 0.25rem 0.75rem;
+        z-index: 100;
+        pointer-events: auto;
     }
 
     .label {
@@ -99,19 +109,18 @@
         text-transform: uppercase;
     }
 
-    /* Mobile-Specific Styles */
     .mobile-scanner {
-        background: #2a3439;
+        max-width: 24rem;
+        width: 100%;
+        position: relative;
         border: 4px solid rgba(0, 0, 0, 0.5);
         border-radius: 1rem;
-        padding: 1rem;
         box-shadow: 0 8px 12px rgba(0, 0, 0, 0.4);
-        position: relative;
-        margin-top: 2rem;
-        /* Pushes the scanner down */
+        background: #2a3439;
+        padding: 1rem;
+        z-index: 10;
     }
 
-    /* Antenna: bottom edge touches the top of the scanner */
     .antenna {
         position: absolute;
         bottom: 100%;
@@ -123,10 +132,9 @@
         border-right: 1px solid rgba(100, 100, 100, 0.2);
         background: linear-gradient(to right, #2a3439, #151d22);
         border-radius: 0.25rem;
+        z-index: 5;
     }
 
-    /* Mobile volume knob: same gradient as the antenna,
-         but remove the bottom border so its bottom edge appears attached */
     .mobile-volume-knob {
         position: absolute;
         bottom: 100%;
@@ -138,8 +146,9 @@
         border-left: 1px solid rgba(255, 255, 255, 0.3);
         border-right: 1px solid rgba(100, 100, 100, 0.2);
         border-bottom: none;
-        /* Removed bottom border */
         border-radius: 0.25rem;
+        cursor: pointer;
+        z-index: 20;
     }
 
     .mobile-volume-knob::after {
@@ -149,15 +158,10 @@
         left: 0;
         width: 100%;
         height: 100%;
-        background: repeating-linear-gradient(90deg,
-                transparent,
-                transparent 0.4rem,
-                rgba(0, 0, 0, 0.8) 0.4rem,
-                rgba(0, 0, 0, 0.8) 0.5rem);
+        background: repeating-linear-gradient(90deg, transparent, transparent 0.4rem, rgba(0, 0, 0, 0.8) 0.4rem, rgba(0, 0, 0, 0.8) 0.5rem);
         pointer-events: none;
     }
 
-    /* Mobile power button, antenna, and other styles remain unchanged */
     .mobile-power-btn {
         background: orange;
         color: white;
@@ -169,85 +173,92 @@
         align-items: center;
         justify-content: center;
         font-size: 1.25rem;
-    }
-
-    .mobile-btns,
-    .mobile-presets {
-        width: 100%;
+        z-index: 30;
     }
 </style>
 
-<!-- Scanner HTML and Alpine logic follow -->
-<div x-data="janusAudioPlayer({
-    wsUrl: '{{ $wsUrl }}',
-    streamId: {{ $streamId }},
-    autoplay: {{ $autoplay ? 'true' : 'false' }},
-    debug: {{ $debug ? 'true' : 'false' }}
-})" x-init="init" class="w-full">
-    <!-- Desktop Layout (visible on md and up) -->
-    <div class="items-center justify-center hidden min-h-screen md:flex">
-        <div class="flex flex-row w-full max-w-6xl p-6 scanner-bg outer-bezel rounded-xl">
-            <!-- Left Section -->
-            <div class="flex flex-col justify-between mr-6">
-                <!-- Power Slider (replaced with toggle button) -->
+<div x-data="janusAudioPlayer({ wsUrl: '{{ $wsUrl }}', streamId: {{ $streamId }}, autoplay: {{ $autoplay ? 'true' : 'false' }}, debug: {{ $debug ? 'true' : 'false' }} })" x-init="init" class="flex items-center justify-center w-full min-h-screen p-4">
+    <div class="w-[72rem]">
+
+        <!-- Mobile Layout -->
+        <div class="mx-auto md:hidden mobile-scanner">
+            <div class="antenna"></div>
+            <div class="mobile-volume-knob volume-toggle" @click="toggleVolumeSlider($event)"></div>
+
+            <div class="relative p-6 mt-4 bg-black rounded-md display-recessed">
+                <div class="absolute inset-0 bg-green-800 rounded-md opacity-20"></div>
+                <div class="relative text-center">
+                    <div class="text-4xl text-green-400 digital" :class="{ 'neon': poweredOn }"
+                        x-text="poweredOn ? 'CH05' : '-'"></div>
+                    <div class="mt-1 text-xl text-green-400 digital" :class="{ 'neon': poweredOn }"
+                        x-text="currentTime"></div>
+                </div>
+            </div>
+            <div class="flex justify-end w-full mt-4">
+                <button @click="togglePower()" class="mobile-power-btn">⏻</button>
+            </div>
+            <div class="grid grid-cols-3 gap-2 mt-4">
+                <template x-for="cmd in ['skip','hold','goto','blacklist','whitelist','log']">
+                    <button @click="sendCommand(cmd)"
+                        class="py-1 text-xs text-white bg-blue-600 rounded btn-convex hover:bg-blue-700 btn-text"
+                        x-text="cmd.charAt(0).toUpperCase() + cmd.slice(1)"></button>
+                </template>
+            </div>
+            <div class="grid grid-cols-3 gap-2 mt-4">
+                <template x-for="n in 9">
+                    <button
+                        class="py-2 font-bold text-gray-900 uppercase bg-gray-200 rounded btn-convex hover:bg-gray-300 btn-text"
+                        x-text="n"></button>
+                </template>
+            </div>
+            <!-- LED Indicator Row: Added w-full to center the indicators -->
+            <div class="flex items-center justify-center w-full mt-4">
+                <template x-for="label in ['Hold', 'Recv', 'Scan']">
+                    <div class="flex flex-col items-center mx-2">
+                        <div :class="poweredOn ? 'bg-green-500' : 'bg-gray-600'" class="w-16 h-3 rounded btn-3d"></div>
+                        <span class="mt-1 text-white label" x-text="label"></span>
+                    </div>
+                </template>
+            </div>
+        </div>
+
+        <!-- Desktop Layout -->
+        <div class="hidden md:flex scanner-bg outer-bezel rounded-xl w-[72rem] max-w-[72rem] p-4">
+            <div class="flex flex-col items-center justify-between mr-6">
                 <div class="flex flex-col items-center mb-2">
                     <button @click="togglePower()"
-                        class="relative flex items-center justify-center bg-gray-700 rounded-md cursor-pointer power-slider slider-container">
-                        <div x-bind:style="poweredOn ? 'top: 4px; bottom: auto;' : 'bottom: 4px; top: auto;'"
-                            class="absolute transition-all duration-300 transform -translate-x-1/2 bg-gray-200 rounded-md left-1/2 power-toggle-btn">
+                        class="relative flex items-center justify-center bg-gray-700 rounded-md power-slider slider-container">
+                        <div :class="poweredOn ? 'top-1 bottom-auto' : 'bottom-1 top-auto'"
+                            class="absolute transition-all duration-300 transform -translate-x-1/2 bg-gray-200 rounded-md power-toggle-btn left-1/2">
                         </div>
                     </button>
                     <div class="mt-2 text-white label">Power</div>
                 </div>
-                <!-- Volume Knob -->
-                <div class="flex flex-col items-center">
-                    <div class="volume-knob btn-convex"></div>
+                <div class="relative flex flex-col items-center">
+                    <div class="cursor-pointer volume-knob btn-convex volume-toggle"
+                        @click="toggleVolumeSlider($event)"></div>
                     <div class="mt-1 text-white label">Volume</div>
+
                 </div>
             </div>
-            <!-- Center Section -->
             <div class="flex flex-col justify-between flex-1">
                 <div class="relative p-6 bg-black rounded-md display-recessed">
                     <div class="absolute inset-0 bg-green-800 rounded-md opacity-20"></div>
                     <div class="relative text-center">
                         <div class="text-5xl text-green-400 digital" :class="{ 'neon': poweredOn }"
-                            x-text="poweredOn ? 'CH05' : '-'">
-                            CH05
-                        </div>
-                        <div class="mt-2 text-5xl text-green-400 digital" :class="{ 'neon': poweredOn }"
-                            x-text="poweredOn ? 'ACTIVE' : '-'">
-                            ACTIVE
-                        </div>
+                            x-text="poweredOn ? 'CH05' : '-'"></div>
+                        <div class="mt-1 text-xl text-green-400 digital" :class="{ 'neon': poweredOn }"
+                            x-text="currentTime"></div>
                     </div>
                 </div>
-                <div class="grid grid-cols-3 gap-2 mt-2">
-                    <button @click="sendCommand('skip')"
-                        class="px-2 py-1 text-xs text-white bg-blue-600 rounded btn-convex hover:bg-blue-700 btn-text">
-                        Skip
-                    </button>
-                    <button @click="sendCommand('hold')"
-                        class="px-2 py-1 text-xs text-white bg-blue-600 rounded btn-convex hover:bg-blue-700 btn-text">
-                        Hold
-                    </button>
-                    <button @click="sendCommand('goto')"
-                        class="px-2 py-1 text-xs text-white bg-blue-600 rounded btn-convex hover:bg-blue-700 btn-text">
-                        Goto
-                    </button>
-                    <button @click="sendCommand('blacklist')"
-                        class="px-2 py-1 text-xs text-white bg-blue-600 rounded btn-convex hover:bg-blue-700 btn-text">
-                        Blacklist
-                    </button>
-                    <button @click="sendCommand('whitelist')"
-                        class="px-2 py-1 text-xs text-white bg-blue-600 rounded btn-convex hover:bg-blue-700 btn-text">
-                        Whitelist
-                    </button>
-                    <button @click="sendCommand('log')"
-                        class="px-2 py-1 text-xs text-white bg-blue-600 rounded btn-convex hover:bg-blue-700 btn-text">
-                        Log
-                    </button>
+                <div class="grid grid-cols-3 gap-2 mt-4">
+                    <template x-for="cmd in ['skip','hold','goto','blacklist','whitelist','log']">
+                        <button @click="sendCommand(cmd)"
+                            class="py-1 text-xs text-white bg-blue-600 rounded btn-convex hover:bg-blue-700 btn-text"
+                            x-text="cmd.charAt(0).toUpperCase() + cmd.slice(1)"></button>
+                    </template>
                 </div>
             </div>
-            <!-- Right Section -->
             <div class="flex flex-col justify-between w-1/3 ml-6">
                 <div class="flex justify-end mt-4 space-x-4">
                     <template x-for="label in ['Hold', 'Recv', 'Scan']">
@@ -261,84 +272,18 @@
                 <div class="grid grid-cols-3 gap-2 mt-6">
                     <template x-for="n in 9">
                         <button
-                            class="px-2 py-2 font-bold text-gray-900 uppercase bg-gray-200 rounded btn-convex hover:bg-gray-300 btn-text"
-                            x-text="n"></button>
-                    </template>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Mobile Layout (Handheld Scanner) -->
-    <div class="flex flex-col items-center justify-center p-4 md:hidden">
-        <div class="relative w-full max-w-sm p-4 mx-auto mobile-scanner rounded-xl">
-            <div class="antenna"></div>
-            <div class="mobile-volume-knob"></div>
-            <div class="relative w-full p-4 mt-4 bg-black rounded-md display-recessed">
-                <div class="absolute inset-0 bg-green-800 rounded-md opacity-20"></div>
-                <div class="relative text-center">
-                    <div class="text-4xl text-green-400 digital" :class="{ 'neon': poweredOn }"
-                        x-text="poweredOn ? 'CH05' : '-'">
-                        CH05
-                    </div>
-                    <div class="mt-2 text-4xl text-green-400 digital" :class="{ 'neon': poweredOn }"
-                        x-text="poweredOn ? 'ACTIVE' : '-'">
-                        ACTIVE
-                    </div>
-                </div>
-            </div>
-            <div class="flex justify-end w-full mt-4">
-                <button @click="togglePower()" class="flex items-center justify-center mobile-power-btn">
-                    ⏻
-                </button>
-            </div>
-            <div class="w-full mt-4 space-y-4">
-                <div class="grid grid-cols-3 gap-2 mobile-btns">
-                    <button @click="sendCommand('skip')"
-                        class="py-1 text-xs text-white bg-blue-600 rounded btn-convex hover:bg-blue-700 btn-text">
-                        Skip
-                    </button>
-                    <button @click="sendCommand('hold')"
-                        class="py-1 text-xs text-white bg-blue-600 rounded btn-convex hover:bg-blue-700 btn-text">
-                        Hold
-                    </button>
-                    <button @click="sendCommand('goto')"
-                        class="py-1 text-xs text-white bg-blue-600 rounded btn-convex hover:bg-blue-700 btn-text">
-                        Goto
-                    </button>
-                    <button @click="sendCommand('blacklist')"
-                        class="py-1 text-xs text-white bg-blue-600 rounded btn-convex hover:bg-blue-700 btn-text">
-                        Blacklist
-                    </button>
-                    <button @click="sendCommand('whitelist')"
-                        class="py-1 text-xs text-white bg-blue-600 rounded btn-convex hover:bg-blue-700 btn-text">
-                        Whitelist
-                    </button>
-                    <button @click="sendCommand('log')"
-                        class="py-1 text-xs text-white bg-blue-600 rounded btn-convex hover:bg-blue-700 btn-text">
-                        Log
-                    </button>
-                </div>
-                <div class="grid grid-cols-3 gap-2 mobile-presets">
-                    <template x-for="n in 9">
-                        <button
                             class="py-2 font-bold text-gray-900 uppercase bg-gray-200 rounded btn-convex hover:bg-gray-300 btn-text"
                             x-text="n"></button>
                     </template>
                 </div>
-                <div class="flex justify-center mt-4 space-x-4">
-                    <template x-for="label in ['Hold', 'Recv', 'Scan']">
-                        <div class="flex flex-col items-center">
-                            <div :class="poweredOn ? 'bg-green-500' : 'bg-gray-600'" class="w-16 h-3 btn-3d"></div>
-                            <span class="mt-1 text-white label" x-text="label"></span>
-                        </div>
-                    </template>
-                </div>
             </div>
         </div>
     </div>
 
-    <!-- Audio Elements -->
-    <audio x-ref="audio" playsinline preload="auto" class="hidden"></audio>
-    <audio x-ref="activator" src="/silent.mp3" preload="auto" class="hidden"></audio>
+    <!-- Centralized Volume Slider Element -->
+    <div class="volume-slider-wrapper" x-show="showVolumeSlider" :style="volumeSliderStyle" x-ref="volumeSlider">
+        <input type="range" min="0" max="1" step="0.01" @input="setVolume" x-model="volume">
+    </div>
+
+    <audio x-ref="audio" playsinline preload="auto" aria-hidden="true" class="absolute invisible w-0 h-0"></audio>
 </div>
